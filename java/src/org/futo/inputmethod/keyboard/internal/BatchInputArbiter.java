@@ -71,7 +71,9 @@ public class BatchInputArbiter {
      */
     public void addDownEventPoint(final int x, final int y, final long downEventTime,
             final long lastLetterTypingTime, final int activePointerCount) {
-        // For dual-thumb support, each pointer tracks its own gesture timing
+        // For dual-thumb support, each pointer tracks its own gesture timing.
+        // Previously: only set sGestureFirstDownTime when activePointerCount == 1
+        // Now: each instance sets its own mGestureFirstDownTime regardless of other pointers
         mGestureFirstDownTime = downEventTime;
         final int elapsedTimeSinceFirstDown = getElapsedTimeSinceFirstDown(downEventTime);
         final int elapsedTimeSinceLastTyping = (int)(downEventTime - lastLetterTypingTime);
@@ -170,8 +172,12 @@ public class BatchInputArbiter {
             final BatchInputArbiterListener listener) {
         synchronized (mAggregatedPointers) {
             mRecognitionPoints.appendAllBatchPoints(mAggregatedPointers);
-            // For dual-thumb support: Allow each gesture to complete independently
-            // Previously required activePointerCount == 1, now each pointer's gesture can end
+            // For dual-thumb support: Allow each gesture to complete independently.
+            // Previously: required activePointerCount == 1 (only complete when all fingers lift)
+            // Now: each pointer's gesture completes when that pointer lifts, enabling simultaneous
+            // dual-thumb input where each gesture is recognized and inserted independently.
+            // This is safe because each PointerTracker instance has its own BatchInputArbiter
+            // with separate mAggregatedPointers, so gestures don't interfere with each other.
             listener.onEndBatchInput(mAggregatedPointers, upEventTime);
             return true;
         }
