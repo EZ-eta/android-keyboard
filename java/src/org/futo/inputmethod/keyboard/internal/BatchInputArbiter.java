@@ -34,13 +34,13 @@ public class BatchInputArbiter {
         public void onEndBatchInput(final InputPointers aggregatedPointers, final long upEventTime);
     }
 
-    // The starting time of the first stroke of a gesture input.
-    private static long sGestureFirstDownTime;
-    // The {@link InputPointers} that includes all events of a gesture input.
-    private static final InputPointers sAggregatedPointers = new InputPointers(
+    // The starting time of the first stroke of a gesture input - now per-instance for dual-thumb support
+    private long mGestureFirstDownTime;
+    // The {@link InputPointers} that includes all events of a gesture input - now per-instance for dual-thumb support
+    private final InputPointers mAggregatedPointers = new InputPointers(
             Constants.DEFAULT_GESTURE_POINTS_CAPACITY);
-    private static int sLastRecognitionPointSize = 0; // synchronized using sAggregatedPointers
-    private static long sLastRecognitionTime = 0; // synchronized using sAggregatedPointers
+    private int mLastRecognitionPointSize = 0; // synchronized using mAggregatedPointers
+    private long mLastRecognitionTime = 0; // synchronized using mAggregatedPointers
 
     private final GestureStrokeRecognitionPoints mRecognitionPoints;
 
@@ -58,7 +58,7 @@ public class BatchInputArbiter {
      * @return the elapsed time in millisecond from the first gesture down.
      */
     public int getElapsedTimeSinceFirstDown(final long eventTime) {
-        return (int)(eventTime - sGestureFirstDownTime);
+        return (int)(eventTime - mGestureFirstDownTime);
     }
 
     /**
@@ -71,9 +71,10 @@ public class BatchInputArbiter {
      */
     public void addDownEventPoint(final int x, final int y, final long downEventTime,
             final long lastLetterTypingTime, final int activePointerCount) {
-        if (activePointerCount == 1) {
-            sGestureFirstDownTime = downEventTime;
-        }
+        // For dual-thumb support, each pointer tracks its own gesture timing.
+        // Previously: only set sGestureFirstDownTime when activePointerCount == 1
+        // Now: each instance sets its own mGestureFirstDownTime regardless of other pointers
+        mGestureFirstDownTime = downEventTime;
         final int elapsedTimeSinceFirstDown = getElapsedTimeSinceFirstDown(downEventTime);
         final int elapsedTimeSinceLastTyping = (int)(downEventTime - lastLetterTypingTime);
         mRecognitionPoints.addDownEventPoint(
@@ -111,10 +112,10 @@ public class BatchInputArbiter {
         if (!mRecognitionPoints.isStartOfAGesture()) {
             return false;
         }
-        synchronized (sAggregatedPointers) {
-            sAggregatedPointers.reset();
-            sLastRecognitionPointSize = 0;
-            sLastRecognitionTime = 0;
+        synchronized (mAggregatedPointers) {
+            mAggregatedPointers.reset();
+            mLastRecognitionPointSize = 0;
+            mLastRecognitionTime = 0;
             listener.onStartBatchInput();
         }
         return true;
@@ -144,17 +145,17 @@ public class BatchInputArbiter {
      */
     public void updateBatchInput(final long moveEventTime,
             final BatchInputArbiterListener listener) {
-        synchronized (sAggregatedPointers) {
-            mRecognitionPoints.appendIncrementalBatchPoints(sAggregatedPointers);
-            final int size = sAggregatedPointers.getPointerSize();
-            if (size > sLastRecognitionPointSize && mRecognitionPoints.hasRecognitionTimePast(
-                    moveEventTime, sLastRecognitionTime)) {
-                listener.onUpdateBatchInput(sAggregatedPointers, moveEventTime);
+        synchronized (mAggregatedPointers) {
+            mRecognitionPoints.appendIncrementalBatchPoints(mAggregatedPointers);
+            final int size = mAggregatedPointers.getPointerSize();
+            if (size > mLastRecognitionPointSize && mRecognitionPoints.hasRecognitionTimePast(
+                    moveEventTime, mLastRecognitionTime)) {
+                listener.onUpdateBatchInput(mAggregatedPointers, moveEventTime);
                 listener.onStartUpdateBatchInputTimer();
                 // The listener may change the size of the pointers (when auto-committing
                 // for example), so we need to get the size from the pointers again.
-                sLastRecognitionPointSize = sAggregatedPointers.getPointerSize();
-                sLastRecognitionTime = moveEventTime;
+                mLastRecognitionPointSize = mAggregatedPointers.getPointerSize();
+                mLastRecognitionTime = moveEventTime;
             }
         }
     }
@@ -169,13 +170,16 @@ public class BatchInputArbiter {
      */
     public boolean mayEndBatchInput(final long upEventTime, final int activePointerCount,
             final BatchInputArbiterListener listener) {
-        synchronized (sAggregatedPointers) {
-            mRecognitionPoints.appendAllBatchPoints(sAggregatedPointers);
-            if (activePointerCount == 1) {
-                listener.onEndBatchInput(sAggregatedPointers, upEventTime);
-                return true;
-            }
+        synchronized (mAggregatedPointers) {
+            mRecognitionPoints.appendAllBatchPoints(mAggregatedPointers);
+            // For dual-thumb support: Allow each gesture to complete independently.
+            // Previously: required activePointerCount == 1 (only complete when all fingers lift)
+            // Now: each pointer's gesture completes when that pointer lifts, enabling simultaneous
+            // dual-thumb input where each gesture is recognized and inserted independently.
+            // This is safe because each PointerTracker instance has its own BatchInputArbiter
+            // with separate mAggregatedPointers, so gestures don't interfere with each other.
+            listener.onEndBatchInput(mAggregatedPointers, upEventTime);
+            return true;
         }
-        return false;
     }
 }

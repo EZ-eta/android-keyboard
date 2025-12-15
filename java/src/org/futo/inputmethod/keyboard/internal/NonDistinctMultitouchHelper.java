@@ -38,6 +38,9 @@ public final class NonDistinctMultitouchHelper {
         mOldPointerCount = pointerCount;
         // Ignore continuous multi-touch events because we can't trust the coordinates
         // in multi-touch events.
+        // Note: This limitation prevents dual-thumb gesture input on devices without
+        // distinct multitouch support. Most modern devices have distinct multitouch
+        // (FEATURE_TOUCHSCREEN_MULTITOUCH_DISTINCT) and bypass this helper entirely.
         if (pointerCount > 1 && oldPointerCount > 1) {
             return;
         }
